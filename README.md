@@ -19,9 +19,11 @@ Desktop computer vision tests, from [FTCDecodeVision](https://github.com/tanayvi
 - `vision.py` — main AprilTag-anchored green/purple ball detection pipeline
 - `vision_fixed.py`, `vision_debug.py`, `vision2.py` — variants and debug views of the pipeline
 - `ballDetect.py` — ball detection plus tracking with an OpenCV tracker
+- `SimpleBallTracker.py` — `SimpleBallTracker` class: per-frame green/purple detection plus CSRT tracking, meant for robot integration
 - `LuxonisTracking.py` — 3D ball trajectory tracking with a Luxonis OAK-D (depthai 3.x), with CSV logging
 - `empiricalTrajectory.py` — empirical trajectory recorder
 - `remoteTestingRoom.py` — saves frames and debug masks for offline analysis
+- `capture_calib.py`, `calibrate.py`, `calib_imgs/` — chessboard capture and camera intrinsics calibration (the `K` and distortion values the design doc's pixel to field projection needs)
 
 ### `robot/`
 
