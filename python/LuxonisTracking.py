@@ -248,7 +248,12 @@ def draw_top_down_view(trajectories, view_size=300):
     scale = 100  # pixels per meter
 
     for color_key, traj in trajectories.items():
-        color_bgr = (0, 255, 0) if color_key == "G" else (255, 0, 255)
+        if color_key == "B":
+            color_bgr = (255, 0, 0)
+        elif color_key == "R":
+            color_bgr = (0, 0, 255)
+        else:
+            color_bgr = (0, 255, 255)
         pts = []
         for p in traj:
             px = int(mid + p["x"] * scale)
@@ -276,7 +281,12 @@ def draw_side_view(trajectories, view_size=300):
     mid_y = view_size // 2
 
     for color_key, traj in trajectories.items():
-        color_bgr = (0, 255, 0) if color_key == "G" else (255, 0, 255)
+        if color_key == "B":
+            color_bgr = (255, 0, 0)
+        elif color_key == "R":
+            color_bgr = (0, 0, 255)
+        else:
+            color_bgr = (0, 255, 255)
         pts = []
         for p in traj:
             px = int(p["z"] * scale)
@@ -320,8 +330,9 @@ def main():
         )
 
         trajectories = {
-            "G": deque(maxlen=MAX_TRAJECTORY_POINTS),
-            "P": deque(maxlen=MAX_TRAJECTORY_POINTS),
+            "B": deque(maxlen=MAX_TRAJECTORY_POINTS),
+            "R": deque(maxlen=MAX_TRAJECTORY_POINTS),
+            "Y": deque(maxlen=MAX_TRAJECTORY_POINTS),
         }
 
         # --- CSV recording state ---
@@ -352,7 +363,7 @@ def main():
             frame = in_rgb.getCvFrame()
             depth_frame = in_depth.getFrame()
 
-            balls, green_mask, purple_mask = detect_balls(frame)
+            balls, _, _, _ = detect_balls(frame)
 
             output = frame.copy()
 
@@ -368,7 +379,12 @@ def main():
 
                 point_3d = pixel_to_3d(cx, cy, depth_mm, intrinsics)
 
-                color_bgr = (0, 255, 0) if ball["color"] == "G" else (255, 0, 255)
+                if ball["color"] == "B":
+                    color_bgr = (255, 0, 0)
+                elif ball["color"] == "R":
+                    color_bgr = (0, 0, 255)
+                else:
+                    color_bgr = (0, 255, 255)
                 cv2.rectangle(output, (x, y), (x + w, y + h), color_bgr, 2)
                 cv2.circle(output, (cx, cy), 4, color_bgr, -1)
 
@@ -399,7 +415,12 @@ def main():
 
             # Draw 2D trajectories on the RGB view
             for color_key, traj in trajectories.items():
-                color_bgr = (0, 255, 0) if color_key == "G" else (255, 0, 255)
+                if color_key == "B":
+                    color_bgr = (255, 0, 0)
+                elif color_key == "R":
+                    color_bgr = (0, 0, 255)
+                else:
+                    color_bgr = (0, 255, 255)
                 draw_trajectory_2d(output, traj, color_bgr)
 
             # FPS counter

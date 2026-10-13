@@ -1,4 +1,4 @@
-# BioBuzzAutoDog
+# FTSEE (BioBuzzAutoDog)
 
 Vision work for FTC DECODE (2025-2026): finding the green and purple balls with a camera, tracking them in field coordinates, and driving the robot to chase them like a dog.
 
@@ -39,6 +39,11 @@ On-robot Kotlin code from the `tanayVision` branch of [FTC-SigmaCorns-22377/Deco
 ```
 cd python
 python -m venv .venv && source .venv/bin/activate
-pip install opencv-python numpy depthai
+pip install opencv-python numpy
 python vision.py
 ```
+
+`vision.py` uses a local USB webcam directly and requests 1280x720 (720p). It
+automatically selects the first readable camera, or a specific device can be
+chosen with `python vision.py --camera 1`. Press `q` or `Esc` to quit. The
+`depthai` package is only needed by the Luxonis OAK-D scripts.

@@ -1,7 +1,13 @@
 #%%
+import argparse
 import cv2
 import numpy as np
 from collections import deque
+from yellow_ball import (
+    BLUE_HSV_LOWER, BLUE_HSV_UPPER, detect_blue,
+    RED_HSV_LOWER_1, RED_HSV_UPPER_1, RED_HSV_LOWER_2, RED_HSV_UPPER_2,
+    YELLOW_HSV_LOWER, YELLOW_HSV_UPPER, detect_red, detect_yellow,
+)
 
 # Temporal smoothing: track last N frames for stable detection
 class StableDetector:
@@ -147,21 +153,23 @@ def get_dominant_color(contour, mask_green, mask_purple):
     return None
 
 
-# ===== GREEN THRESHOLDS (TIGHTENED) =====
-# HSV - tighter saturation requirement
-GREEN_HSV_LOWER = np.array([65, 100, 40])
-GREEN_HSV_UPPER = np.array([90, 255, 220])
-# YCrCb - keeps green, rejects similar colors
+# ===== BALL THRESHOLDS: BLUE / RED / YELLOW =====
+# Saturation and value ranges tuned for team balls.
+# Back-compat aliases for older scripts that still import the old names.
+GREEN_HSV_LOWER = BLUE_HSV_LOWER
+GREEN_HSV_UPPER = BLUE_HSV_UPPER
 GREEN_YCRCB_LOWER = np.array([50, 35, 60])
 GREEN_YCRCB_UPPER = np.array([160, 100, 145])
-
-# ===== PURPLE THRESHOLDS (YCrCb ONLY) =====
 PURPLE_YCRCB_LOWER = np.array([80, 135, 130])
 PURPLE_YCRCB_UPPER = np.array([170, 175, 180])
 
 # ===== DETECTION SETTINGS =====
-MIN_BALL_AREA = 1000  # Minimum contour area (filters small noise)
-MAX_BALL_AREA = 15000  # Maximum contour area (filters large blobs)
+# 3.6 in red/blue balls and 2.8 in yellow balls.
+# Yellow is about 60% of the blue/red projected area, so its min threshold is lower.
+MIN_BALL_AREA_BLUE_RED = 300
+MIN_BALL_AREA_YELLOW = 500
+MAX_BALL_AREA = 50000
+MAX_BALL_AREA_YELLOW = 120000
 
 
 def separate_touching_balls(mask, min_area=800, expected_ball_area=2000):
@@ -281,91 +289,132 @@ def runPipeline(image, use_stabilization=True):
 
     # Convert to color spaces
     img_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    img_ycrcb = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
 
-    # ===== GREEN DETECTION (HSV + YCrCb dual mask) =====
-    mask_green_hsv = cv2.inRange(img_hsv, GREEN_HSV_LOWER, GREEN_HSV_UPPER)
-    mask_green_ycrcb = cv2.inRange(img_ycrcb, GREEN_YCRCB_LOWER, GREEN_YCRCB_UPPER)
-    mask_green_raw = cv2.bitwise_and(mask_green_hsv, mask_green_ycrcb)
+    mask_blue, blue_contours = detect_blue(image)
 
-    # ===== PURPLE DETECTION (YCrCb ONLY) =====
-    mask_purple_raw = cv2.inRange(img_ycrcb, PURPLE_YCRCB_LOWER, PURPLE_YCRCB_UPPER)
+    mask_red, red_contours = detect_red(image)
 
-    # ===== NO MORPHOLOGY - RAW MASKS =====
-    # YCrCb masks are already clean, morphology was causing issues
-    mask_green = mask_green_raw.copy()
-    mask_purple = mask_purple_raw.copy()
+    mask_yellow, yellow_contours = detect_yellow(image)
 
-    # ===== SIMPLE CONTOUR DETECTION =====
-    green_contours_raw, _ = cv2.findContours(mask_green, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    purple_contours_raw, _ = cv2.findContours(mask_purple, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Simple raw masks
+    mask_blue_clean = mask_blue.copy()
+    mask_red_clean = mask_red.copy()
+    mask_yellow_clean = mask_yellow.copy()
 
-    # Filter by area - lowered minimum since balls have holes
-    green_contours = [c for c in green_contours_raw if 300 < cv2.contourArea(c) < 20000]
-    purple_contours = [c for c in purple_contours_raw if 300 < cv2.contourArea(c) < 20000]
+    blue_contours_raw = blue_contours
+    red_contours_raw = red_contours
+    yellow_contours_raw = yellow_contours
 
-    # Combine masks for visualization
-    mask_clean = cv2.bitwise_or(mask_green, mask_purple)
+    blue_contours = [c for c in blue_contours_raw if MIN_BALL_AREA_BLUE_RED < cv2.contourArea(c) < MAX_BALL_AREA]
+    red_contours = [c for c in red_contours_raw if MIN_BALL_AREA_BLUE_RED < cv2.contourArea(c) < MAX_BALL_AREA]
+    yellow_contours = [
+        c for c in yellow_contours_raw
+        if MIN_BALL_AREA_YELLOW < cv2.contourArea(c) < MAX_BALL_AREA_YELLOW
+    ]
+
+    mask_clean = cv2.bitwise_or(mask_blue, mask_red)
+    mask_clean = cv2.bitwise_or(mask_clean, mask_yellow)
 
     detected_shapes = []
-    green_count = 0
-    purple_count = 0
+    blue_count = 0
+    red_count = 0
+    yellow_count = 0
 
-    # Process green contours (already filtered, from green mask = definitely green)
-    for contour in green_contours:
-        x, y, w, h = cv2.boundingRect(contour)
-        center_x = x + w // 2
-        area = cv2.contourArea(contour)
+    for contour, color, count_name, color_bgr in [
+        (blue_contours, 'B', 'blue_count', (255, 0, 0)),
+        (red_contours, 'R', 'red_count', (0, 0, 255)),
+        (yellow_contours, 'Y', 'yellow_count', (0, 255, 255)),
+    ]:
+        for contour_item in contour:
+            x, y, w, h = cv2.boundingRect(contour_item)
+            center_x = x + w // 2
+            area = cv2.contourArea(contour_item)
+            if color == 'B':
+                blue_count += 1
+                label = f'B{blue_count}'
+            elif color == 'R':
+                red_count += 1
+                label = f'R{red_count}'
+            else:
+                yellow_count += 1
+                label = f'Y{yellow_count}'
 
-        green_count += 1
-        detected_shapes.append((center_x, 'G', contour, x, y, area))
-        cv2.drawContours(output, [contour], -1, (0, 255, 0), 3)
-        cv2.putText(output, f'G{green_count}', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            detected_shapes.append((center_x, color, contour_item, x, y, area))
+            cv2.drawContours(output, [contour_item], -1, color_bgr, 3)
+            cv2.putText(output, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_bgr, 2)
 
-    # Process purple contours (already filtered, from purple mask = definitely purple)
-    for contour in purple_contours:
-        x, y, w, h = cv2.boundingRect(contour)
-        center_x = x + w // 2
-        area = cv2.contourArea(contour)
-
-        purple_count += 1
-        detected_shapes.append((center_x, 'P', contour, x, y, area))
-        cv2.drawContours(output, [contour], -1, (255, 0, 255), 3)
-        cv2.putText(output, f'P{purple_count}', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
-
-    # Sort by x position (left to right)
     detected_shapes.sort(key=lambda b: b[0])
     raw_motif = ''.join([b[1] for b in detected_shapes])
 
-    # Apply temporal stabilization
     if use_stabilization:
         stable_motif = stable_detector.update(raw_motif)
     else:
         stable_motif = raw_motif
 
     total_count = len(stable_motif)
-
-    # Show both raw and stable motif for debugging
     cv2.putText(output, f"Stable: {stable_motif} ({total_count})", (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
     cv2.putText(output, f"Raw: {raw_motif}", (10, 60),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
-    cv2.putText(output, f"G:{green_count} P:{purple_count}", (10, 85),
+    cv2.putText(output, f"B:{blue_count} R:{red_count} Y:{yellow_count}", (10, 85),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-    return stable_motif, output, mask_clean, mask_green, mask_purple
+    return stable_motif, output, mask_clean, mask_blue_clean, mask_red_clean, mask_yellow_clean
+
+
+def open_camera(camera_index=None, width=1280, height=720):
+    """Open a local webcam and request the specified capture resolution."""
+    candidates = [camera_index] if camera_index is not None else range(10)
+    backend = cv2.CAP_V4L2 if hasattr(cv2, "CAP_V4L2") else cv2.CAP_ANY
+
+    for index in candidates:
+        cap = cv2.VideoCapture(index, backend)
+        if not cap.isOpened():
+            cap.release()
+            continue
+
+        # MJPG is commonly required for Logitech webcams to deliver 720p.
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+        if cap.read()[0]:
+            actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            print(f"Camera {index}: {actual_width}x{actual_height}")
+            if (actual_width, actual_height) != (width, height):
+                print(f"Warning: camera did not accept requested {width}x{height}")
+            return cap
+
+        cap.release()
+
+    requested = camera_index if camera_index is not None else "any available"
+    raise RuntimeError(f"Could not read frames from camera {requested}. "
+                       "Check that the Logitech camera is connected and not in use.")
 
 
 if __name__ == "__main__":
-    cap = cv2.VideoCapture(0)
-    cv2.namedWindow("Color Output")
+    parser = argparse.ArgumentParser(description="Detect colored balls from a local webcam.")
+    parser.add_argument("--camera", type=int, default=None,
+                        help="camera index (default: first readable camera)")
+    parser.add_argument("--width", type=int, default=1280,
+                        help="requested frame width (default: 1280)")
+    parser.add_argument("--height", type=int, default=720,
+                        help="requested frame height (default: 720)")
+    args = parser.parse_args()
+
+    try:
+        cap = open_camera(args.camera, args.width, args.height)
+    except RuntimeError as error:
+        raise SystemExit(str(error))
+
+    cv2.namedWindow("Color Output", cv2.WINDOW_NORMAL)
 
     last_printed = ""
 
     print("="*50)
     print("BALL DETECTION")
-    print("Green: HSV + YCrCb dual mask")
-    print("Purple: YCrCb only")
+    print("Blue/Red/Yellow HSV masks")
     print("="*50)
 
     while True:
@@ -373,7 +422,7 @@ if __name__ == "__main__":
         if not ret:
             break
 
-        stable_motif, output, mask_combined, mask_green, mask_purple = runPipeline(frame)
+        stable_motif, output, mask_combined, mask_blue, mask_red, mask_yellow = runPipeline(frame)
 
         # Only print when motif changes (reduces console spam)
         if stable_motif and stable_motif != last_printed:
@@ -384,10 +433,11 @@ if __name__ == "__main__":
 
         cv2.imshow("Color Output", output)
         cv2.imshow("Mask (B&W)", mask_combined)
-        cv2.imshow("Green Mask", mask_green)
-        cv2.imshow("Purple Mask", mask_purple)
+        cv2.imshow("Blue Mask", mask_blue)
+        cv2.imshow("Red Mask", mask_red)
+        cv2.imshow("Yellow Mask", mask_yellow)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF in (ord('q'), 27):
             break
 
     cap.release()
@@ -957,8 +1007,8 @@ def purple_tuner():
     cv2.destroyAllWindows()
 
 
-# Run purple tuner:
-purple_tuner()
+# Run manually when tuning thresholds:
+# purple_tuner()
 
 # %%
 # RAMP-BASED BALL DETECTION

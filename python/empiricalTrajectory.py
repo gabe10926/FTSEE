@@ -198,12 +198,17 @@ while True:
     output = frame.copy()
 
     # Detect balls — same as ballDetect.py
-    balls, green_mask, purple_mask = detect_balls(frame)
+    balls, _, _, _ = detect_balls(frame)
 
     # Draw all detected balls
     for ball in balls:
         x, y, w, h = ball['bbox']
-        clr = (0, 255, 0) if ball['color'] == 'G' else (255, 0, 255)
+        if ball['color'] == 'B':
+            clr = (255, 0, 0)
+        elif ball['color'] == 'R':
+            clr = (0, 0, 255)
+        else:
+            clr = (0, 255, 255)
         cv2.rectangle(output, (x, y), (x + w, y + h), clr, 2)
 
     # Track the largest ball's center

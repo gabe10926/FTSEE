@@ -20,18 +20,22 @@ class EyeBrain : VisionProcessor {
     // COLOR THRESHOLDS (from vision.py)
     // ========================================================================
 
-    // GREEN (HSV AND YCrCb intersection)
-    private val greenHsvLower = Scalar(65.0, 100.0, 40.0)
-    private val greenHsvUpper = Scalar(90.0, 255.0, 220.0)
-    private val greenYCrCbLower = Scalar(50.0, 35.0, 60.0)
-    private val greenYCrCbUpper = Scalar(160.0, 100.0, 145.0)
+    // BLUE / RED / YELLOW (HSV)
+    private val blueHsvLower = Scalar(100.0, 80.0, 60.0)
+    private val blueHsvUpper = Scalar(130.0, 255.0, 255.0)
 
-    // PURPLE (YCrCb only)
-    private val purpleYCrCbLower = Scalar(80.0, 135.0, 130.0)
-    private val purpleYCrCbUpper = Scalar(170.0, 175.0, 180.0)
+    private val redHsvLower1 = Scalar(0.0, 80.0, 60.0)
+    private val redHsvUpper1 = Scalar(12.0, 255.0, 255.0)
+    private val redHsvLower2 = Scalar(170.0, 80.0, 60.0)
+    private val redHsvUpper2 = Scalar(180.0, 255.0, 255.0)
+
+    private val yellowHsvLower = Scalar(18.0, 80.0, 60.0)
+    private val yellowHsvUpper = Scalar(38.0, 255.0, 255.0)
 
     // Detection area bounds
-    private val minBallArea = 300.0
+    // 3.6 in red/blue balls and 2.8 in yellow balls; yellow is roughly 60% of the area.
+    private val minBallAreaBlueRed = 300.0
+    private val minBallAreaYellow = 180.0
     private val maxBallArea = 20000.0
 
     // ROI multipliers (of tag size) - ramp is LEFT and BELOW the tag
@@ -63,11 +67,11 @@ class EyeBrain : VisionProcessor {
 
     // Reusable Mats to avoid per-frame allocation
     private val hsv = Mat()
-    private val ycrcb = Mat()
-    private val greenHsv = Mat()
-    private val greenYCrCb = Mat()
-    private val greenMask = Mat()
-    private val purpleMask = Mat()
+    private val blueMask = Mat()
+    private val redMask1 = Mat()
+    private val redMask2 = Mat()
+    private val redMask = Mat()
+    private val yellowMask = Mat()
     private val roiMask = Mat()
     private val hierarchy = Mat()
 
@@ -117,27 +121,32 @@ class EyeBrain : VisionProcessor {
         // Color conversions
         // Note: FTC VisionPortal delivers frames as RGB, not BGR
         Imgproc.cvtColor(frame, hsv, Imgproc.COLOR_RGB2HSV)
-        Imgproc.cvtColor(frame, ycrcb, Imgproc.COLOR_RGB2YCrCb)
 
-        // GREEN: HSV AND YCrCb
-        Core.inRange(hsv, greenHsvLower, greenHsvUpper, greenHsv)
-        Core.inRange(ycrcb, greenYCrCbLower, greenYCrCbUpper, greenYCrCb)
-        Core.bitwise_and(greenHsv, greenYCrCb, greenMask)
-        Core.bitwise_and(greenMask, roiMask, greenMask)
+        Core.inRange(hsv, blueHsvLower, blueHsvUpper, blueMask)
+        Core.inRange(hsv, redHsvLower1, redHsvUpper1, redMask1)
+        Core.inRange(hsv, redHsvLower2, redHsvUpper2, redMask2)
+        Core.bitwise_or(redMask1, redMask2, redMask)
+        Core.inRange(hsv, yellowHsvLower, yellowHsvUpper, yellowMask)
 
-        // PURPLE: YCrCb only
-        Core.inRange(ycrcb, purpleYCrCbLower, purpleYCrCbUpper, purpleMask)
-        Core.bitwise_and(purpleMask, roiMask, purpleMask)
+        Core.bitwise_and(blueMask, roiMask, blueMask)
+        Core.bitwise_and(redMask, roiMask, redMask)
+        Core.bitwise_and(yellowMask, roiMask, yellowMask)
 
         // Find contours and build detections
         val result = mutableListOf<BallDetection>()
+        val candidates = listOf(
+            blueMask to ("B" to minBallAreaBlueRed),
+            redMask to ("R" to minBallAreaBlueRed),
+            yellowMask to ("Y" to minBallAreaYellow)
+        )
 
-        for ((mask, color) in listOf(greenMask to "G", purpleMask to "P")) {
+        for ((mask, pair) in candidates) {
             val contours = mutableListOf<MatOfPoint>()
             Imgproc.findContours(mask, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
+            val (color, minArea) = pair
             for (cnt in contours) {
                 val area = Imgproc.contourArea(cnt)
-                if (area in minBallArea..maxBallArea) {
+                if (area >= minArea && area <= maxBallArea) {
                     val rect = Imgproc.boundingRect(cnt)
                     val cx = rect.x + rect.width / 2
                     val cy = rect.y + rect.height / 2
@@ -155,14 +164,14 @@ class EyeBrain : VisionProcessor {
 
         // Draw ROI and detections on frame for camera stream preview
         Imgproc.polylines(frame, listOf(roi), true, Scalar(255.0, 0.0, 0.0), 2)
-        var gCount = 0; var pCount = 0
+        var bCount = 0; var rCount = 0; var yCount = 0
         for (det in result) {
             val drawColor: Scalar
             val label: String
-            if (det.color == "G") {
-                gCount++; drawColor = Scalar(0.0, 255.0, 0.0); label = "G$gCount"
-            } else {
-                pCount++; drawColor = Scalar(255.0, 0.0, 255.0); label = "P$pCount"
+            when (det.color) {
+                "B" -> { bCount++; drawColor = Scalar(255.0, 0.0, 0.0); label = "B$bCount" }
+                "R" -> { rCount++; drawColor = Scalar(0.0, 0.0, 255.0); label = "R$rCount" }
+                else -> { yCount++; drawColor = Scalar(0.0, 255.0, 255.0); label = "Y$yCount" }
             }
             Imgproc.circle(frame, Point(det.centerX.toDouble(), det.centerY.toDouble()), 10, drawColor, 2)
             Imgproc.putText(frame, label, Point(det.centerX - 15.0, det.centerY - 20.0),

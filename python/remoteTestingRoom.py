@@ -8,7 +8,8 @@ import os
 from datetime import datetime
 
 # Import detection from vision.py
-from vision import runPipeline, PURPLE_YCRCB_LOWER, PURPLE_YCRCB_UPPER, GREEN_HSV_LOWER, GREEN_HSV_UPPER, GREEN_YCRCB_LOWER, GREEN_YCRCB_UPPER
+from vision import runPipeline, BLUE_HSV_LOWER, BLUE_HSV_UPPER, RED_HSV_LOWER_1, RED_HSV_UPPER_1, RED_HSV_LOWER_2, RED_HSV_UPPER_2
+from yellow_ball import detect_blue, detect_red, detect_yellow
 
 # Create output directory
 OUTPUT_DIR = "/Users/tanayvinaykya/Desktop/robotics/vision/test_frames"
@@ -17,47 +18,46 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 def save_debug_frames(frame, frame_id):
     """Save frame and all debug masks for Claude to analyze"""
 
-    # Convert to color spaces
     img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    img_ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
 
-    # Create masks (same as vision.py)
-    mask_green_hsv = cv2.inRange(img_hsv, GREEN_HSV_LOWER, GREEN_HSV_UPPER)
-    mask_green_ycrcb = cv2.inRange(img_ycrcb, GREEN_YCRCB_LOWER, GREEN_YCRCB_UPPER)
-    mask_green = cv2.bitwise_and(mask_green_hsv, mask_green_ycrcb)
+    blue_mask, _ = detect_blue(frame)
+    red_mask, _ = detect_red(frame)
+    yellow_mask, _ = detect_yellow(frame)
 
-    mask_purple = cv2.inRange(img_ycrcb, PURPLE_YCRCB_LOWER, PURPLE_YCRCB_UPPER)
+    motif, output, mask_combined, mask_blue, mask_red, mask_yellow = runPipeline(frame)
 
-    # Run full pipeline
-    motif, output, mask_combined, _, _ = runPipeline(frame)
+    blue_contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    red_contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    yellow_contours, _ = cv2.findContours(yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Find contours for debug
-    green_contours, _ = cv2.findContours(mask_green, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    purple_contours, _ = cv2.findContours(mask_purple, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    # Print contour info
     print(f"\n{'='*50}")
     print(f"Frame {frame_id} Analysis:")
     print(f"{'='*50}")
     print(f"Detected motif: {motif}")
-    print(f"\nGreen contours found: {len(green_contours)}")
-    for i, c in enumerate(green_contours):
+    print(f"\nBlue contours found: {len(blue_contours)}")
+    for i, c in enumerate(blue_contours):
         area = cv2.contourArea(c)
         x, y, w, h = cv2.boundingRect(c)
-        print(f"  G{i+1}: area={area:.0f}, pos=({x},{y}), size={w}x{h}")
+        print(f"  B{i+1}: area={area:.0f}, pos=({x},{y}), size={w}x{h}")
 
-    print(f"\nPurple contours found: {len(purple_contours)}")
-    for i, c in enumerate(purple_contours):
+    print(f"\nRed contours found: {len(red_contours)}")
+    for i, c in enumerate(red_contours):
         area = cv2.contourArea(c)
         x, y, w, h = cv2.boundingRect(c)
-        print(f"  P{i+1}: area={area:.0f}, pos=({x},{y}), size={w}x{h}")
+        print(f"  R{i+1}: area={area:.0f}, pos=({x},{y}), size={w}x{h}")
 
-    # Save all images
+    print(f"\nYellow contours found: {len(yellow_contours)}")
+    for i, c in enumerate(yellow_contours):
+        area = cv2.contourArea(c)
+        x, y, w, h = cv2.boundingRect(c)
+        print(f"  Y{i+1}: area={area:.0f}, pos=({x},{y}), size={w}x{h}")
+
     cv2.imwrite(f"{OUTPUT_DIR}/{frame_id}_1_original.png", frame)
     cv2.imwrite(f"{OUTPUT_DIR}/{frame_id}_2_output.png", output)
-    cv2.imwrite(f"{OUTPUT_DIR}/{frame_id}_3_mask_green.png", mask_green)
-    cv2.imwrite(f"{OUTPUT_DIR}/{frame_id}_4_mask_purple.png", mask_purple)
-    cv2.imwrite(f"{OUTPUT_DIR}/{frame_id}_5_mask_combined.png", mask_combined)
+    cv2.imwrite(f"{OUTPUT_DIR}/{frame_id}_3_mask_blue.png", blue_mask)
+    cv2.imwrite(f"{OUTPUT_DIR}/{frame_id}_4_mask_red.png", red_mask)
+    cv2.imwrite(f"{OUTPUT_DIR}/{frame_id}_5_mask_yellow.png", yellow_mask)
+    cv2.imwrite(f"{OUTPUT_DIR}/{frame_id}_6_mask_combined.png", mask_combined)
 
     print(f"\nSaved to {OUTPUT_DIR}/{frame_id}_*.png")
     print(f"Share these images with Claude for analysis!")
@@ -82,12 +82,13 @@ def main():
             break
 
         # Run pipeline for live preview
-        motif, output, mask_combined, mask_green, mask_purple = runPipeline(frame)
+        motif, output, mask_combined, mask_blue, mask_red, mask_yellow = runPipeline(frame)
 
         # Show windows
         cv2.imshow("Live Output", output)
-        cv2.imshow("Green Mask", mask_green)
-        cv2.imshow("Purple Mask", mask_purple)
+        cv2.imshow("Blue Mask", mask_blue)
+        cv2.imshow("Red Mask", mask_red)
+        cv2.imshow("Yellow Mask", mask_yellow)
 
         key = cv2.waitKey(1) & 0xFF
 
