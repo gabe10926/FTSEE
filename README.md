@@ -47,3 +47,7 @@ python vision.py
 automatically selects the first readable camera, or a specific device can be
 chosen with `python vision.py --camera 1`. Press `q` or `Esc` to quit. The
 `depthai` package is only needed by the Luxonis OAK-D scripts.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The `robot/` files come from the Sigma Corns Decode repo and `python/` from FTCDecodeVision, so check those projects for their own terms.
